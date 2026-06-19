@@ -136,15 +136,15 @@ ensure_docker_service() {
 
 wait_for_mongo() {
   if [[ "${USE_EXTERNAL_MONGO:-0}" == "1" ]]; then
-    info "Waiting for external MongoDB availability at $MONGO_URI..."
+    info "Waiting for external MongoDB availability at $EFFECTIVE_MONGO_URI..."
     for i in $(seq 1 40); do
-      if command -v mongosh >/dev/null 2>&1 && mongosh "$MONGO_URI" --eval "db.adminCommand('ping')" >/dev/null 2>&1; then
+      if command -v mongosh >/dev/null 2>&1 && mongosh "$EFFECTIVE_MONGO_URI" --eval "db.adminCommand('ping')" >/dev/null 2>&1; then
         info "External MongoDB is reachable"
         return
       fi
       sleep 2
     done
-    fail "External MongoDB is not reachable at $MONGO_URI"
+    fail "External MongoDB is not reachable at $EFFECTIVE_MONGO_URI"
   fi
 
   info "Waiting for MongoDB container health..."
@@ -175,6 +175,19 @@ cleanup() {
 }
 
 trap cleanup EXIT INT TERM
+
+normalize_mongo_uri_for_host() {
+  local uri="$1"
+  if [[ "$uri" == mongodb://mongo:* ]]; then
+    echo "${uri/mongodb:\/\/mongo:/mongodb://localhost:}"
+    return
+  fi
+  if [[ "$uri" == mongodb://mongo/* ]]; then
+    echo "${uri/mongodb:\/\/mongo\//mongodb://localhost/}"
+    return
+  fi
+  echo "$uri"
+}
 
 PM="$(detect_pkg_manager)"
 info "Detected package manager: $PM"
@@ -238,6 +251,7 @@ source "$ROOT_DIR/.env"
 set +a
 
 MONGO_URI="${MONGODB_URI:-mongodb://localhost:27017/perf_platform}"
+EFFECTIVE_MONGO_URI="$(normalize_mongo_uri_for_host "$MONGO_URI")"
 USE_EXTERNAL_MONGO=0
 
 mkdir -p /tmp/k6-scripts
@@ -247,10 +261,12 @@ cd "$ROOT_DIR"
 info "Starting infra containers (mongo, prometheus, grafana)..."
 if ! docker compose up -d mongo prometheus grafana; then
   warn "Could not start MongoDB container (likely port 27017 already in use)."
-  warn "Falling back to external/local MongoDB at $MONGO_URI"
+  warn "Falling back to external/local MongoDB at $EFFECTIVE_MONGO_URI"
   docker compose up -d prometheus grafana
   USE_EXTERNAL_MONGO=1
 fi
+
+info "Using MongoDB URI for local backend/seed: $EFFECTIVE_MONGO_URI"
 
 info "Ensuring k6 image is present..."
 docker pull grafana/k6:0.54.0 >/dev/null
@@ -264,10 +280,10 @@ info "Installing frontend dependencies..."
 (cd "$ROOT_DIR/frontend" && npm install)
 
 info "Seeding database with default user only..."
-(cd "$ROOT_DIR/backend" && npm run seed:user)
+(cd "$ROOT_DIR/backend" && MONGODB_URI="$EFFECTIVE_MONGO_URI" npm run seed:user)
 
 info "Starting backend and frontend in dev mode..."
-(cd "$ROOT_DIR/backend" && npm run dev > "$RUNTIME_DIR/backend.log" 2>&1 & echo $! > "$RUNTIME_DIR/backend.pid")
+(cd "$ROOT_DIR/backend" && MONGODB_URI="$EFFECTIVE_MONGO_URI" npm run dev > "$RUNTIME_DIR/backend.log" 2>&1 & echo $! > "$RUNTIME_DIR/backend.pid")
 (cd "$ROOT_DIR/frontend" && npm run dev -- --host 0.0.0.0 --port 5173 > "$RUNTIME_DIR/frontend.log" 2>&1 & echo $! > "$RUNTIME_DIR/frontend.pid")
 
 info "All services are up."
