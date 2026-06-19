@@ -230,6 +230,9 @@ if [[ ! -f "$ROOT_DIR/.env" ]]; then
 fi
 
 # Load environment values from .env so bootstrap checks use the same runtime config.
+# Convert CRLF to LF if needed (handles Windows line endings from git clone with core.autocrlf=true).
+sed -i 's/\r$//' "$ROOT_DIR/.env" 2>/dev/null || true
+
 set -a
 source "$ROOT_DIR/.env"
 set +a

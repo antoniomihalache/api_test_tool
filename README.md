@@ -68,6 +68,10 @@ What it does:
 - Seeds database with default app user only (no demo scenarios/services/flows)
 - Starts backend and frontend dev servers
 
+**Windows + WSL Note:**
+
+If you clone on Windows (or with Git `core.autocrlf=true`), the bootstrap script automatically converts Windows line endings (CRLF) to Unix line endings (LF) when sourcing `.env`, so line-ending issues are transparent.
+
 ### App Access After Bootstrap
 
 | Service | URL | Notes |
@@ -134,6 +138,48 @@ If you only want the default user (no demo data), run:
 
 ```bash
 cd backend && npm run seed:user
+```
+
+### Troubleshooting Bootstrap
+
+**MongoDB port 27017 already in use:**
+
+The bootstrap script automatically falls back to your local/external MongoDB when the containerized Mongo cannot bind port 27017. Make sure `MONGODB_URI` in `.env` points to your running MongoDB instance.
+
+**Windows line-ending errors (`$'\r': command not found`):**
+
+The bootstrap script handles this automatically by converting CRLF → LF before sourcing `.env`. If issues persist, manually convert:
+
+```bash
+dos2unix .env
+```
+
+Or:
+
+```bash
+sed -i 's/\r$//' .env
+```
+
+## MongoDB Configuration
+
+By default, bootstrap starts a containerized MongoDB on `localhost:27017`. If you have a local MongoDB already running, bootstrap automatically detects the port conflict and falls back to external MongoDB.
+
+**For Docker Compose Mongo** (no local instance):
+
+```env
+MONGODB_URI=mongodb://mongo:27017/perf_platform
+```
+
+**For local/external Mongo**:
+
+```env
+MONGODB_URI=mongodb://localhost:27017/perf_platform
+```
+
+You can also use a cloud MongoDB connection string:
+
+```env
+MONGODB_URI=mongodb+srv://username:password@cluster.mongodb.net/perf_platform
 ```
 
 ## Grafana Dashboards (Provisioned By Default)
