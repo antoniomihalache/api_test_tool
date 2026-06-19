@@ -1,0 +1,267 @@
+{
+  "uid": "k6-endpoint-breakdown",
+  "title": "k6 Endpoint Breakdown",
+  "tags": ["k6", "performance", "endpoint"],
+  "timezone": "browser",
+  "schemaVersion": 38,
+  "version": 1,
+  "refresh": "5s",
+  "time": { "from": "now-30m", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Request Volume by Request Name",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 0, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "expr": "sum by (name) (rate(k6_http_reqs_total{endpoint!=\"\"}[$__rate_interval]))",
+          "legendFormat": "{{name}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "reqps" } },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" } }
+    },
+    {
+      "id": 2,
+      "title": "Status Code Mix by Request Name",
+      "type": "timeseries",
+      "gridPos": { "x": 12, "y": 0, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "expr": "sum by (name, status) (increase(k6_http_reqs_total{endpoint!=\"\"}[$__rate_interval]))",
+          "legendFormat": "{{name}} {{status}}",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "legend": { "displayMode": "table", "placement": "bottom" },
+        "tooltip": { "mode": "multi" }
+      }
+    },
+    {
+      "id": 3,
+      "title": "p95 Latency by Request Name",
+      "type": "bargauge",
+      "gridPos": { "x": 0, "y": 8, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "expr": "max by (name) (k6_http_req_duration_p95{endpoint!=\"\",expected_response=\"true\"}) * 1000",
+          "legendFormat": "{{name}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "thresholds": {
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 300 },
+              { "color": "red", "value": 500 }
+            ]
+          }
+        }
+      },
+      "options": {
+        "displayMode": "gradient",
+        "orientation": "horizontal",
+        "reduceOptions": { "calcs": ["lastNotNull"] }
+      }
+    },
+    {
+      "id": 4,
+      "title": "p99 Latency by Request Name",
+      "type": "bargauge",
+      "gridPos": { "x": 12, "y": 8, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "expr": "max by (name) (k6_http_req_duration_p99{endpoint!=\"\",expected_response=\"true\"}) * 1000",
+          "legendFormat": "{{name}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "thresholds": {
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 400 },
+              { "color": "red", "value": 700 }
+            ]
+          }
+        }
+      },
+      "options": {
+        "displayMode": "gradient",
+        "orientation": "horizontal",
+        "reduceOptions": { "calcs": ["lastNotNull"] }
+      }
+    },
+    {
+      "id": 5,
+      "title": "Error Rate by Request Name",
+      "type": "bargauge",
+      "gridPos": { "x": 0, "y": 16, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "expr": "sum by (name) (rate(k6_http_reqs_total{endpoint!=\"\",expected_response=\"false\"}[$__rate_interval])) / sum by (name) (rate(k6_http_reqs_total{endpoint!=\"\"}[$__rate_interval]))",
+          "legendFormat": "{{name}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "thresholds": {
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 0.01 },
+              { "color": "red", "value": 0.05 }
+            ]
+          }
+        }
+      },
+      "options": {
+        "displayMode": "gradient",
+        "orientation": "horizontal",
+        "reduceOptions": { "calcs": ["lastNotNull"] }
+      }
+    },
+    {
+      "id": 6,
+      "title": "Failing Checks / Reasons",
+      "type": "table",
+      "gridPos": { "x": 12, "y": 16, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "expr": "(1 - avg by (check) (k6_checks_rate)) > 0",
+          "format": "table",
+          "instant": true,
+          "legendFormat": "{{check}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "thresholds": {
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 0.01 },
+              { "color": "red", "value": 0.05 }
+            ]
+          }
+        }
+      },
+      "options": {
+        "showHeader": true,
+        "sortBy": [{ "displayName": "Value", "desc": true }]
+      }
+    },
+    {
+      "id": 7,
+      "title": "Failed Requests by HTTP Status",
+      "type": "bargauge",
+      "gridPos": { "x": 0, "y": 24, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "expr": "sum by (status) (increase(k6_http_reqs_total{endpoint!=\"\",expected_response=\"false\"}[$__rate_interval]))",
+          "legendFormat": "HTTP {{status}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "min": 0,
+          "thresholds": {
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 1 },
+              { "color": "red", "value": 10 }
+            ]
+          }
+        }
+      },
+      "options": {
+        "displayMode": "gradient",
+        "orientation": "horizontal",
+        "reduceOptions": { "calcs": ["lastNotNull"] }
+      }
+    },
+    {
+      "id": 8,
+      "title": "Failed Requests by error_code",
+      "type": "table",
+      "gridPos": { "x": 12, "y": 24, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "expr": "sum by (error_code) (increase(k6_http_reqs_total{endpoint!=\"\",expected_response=\"false\",error_code!=\"\"}[$__rate_interval]))",
+          "format": "table",
+          "instant": true,
+          "legendFormat": "{{error_code}}",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "showHeader": true,
+        "sortBy": [{ "displayName": "Value", "desc": true }]
+      }
+    },
+    {
+      "id": 9,
+      "title": "Expected vs Unexpected Responses",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 32, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "expr": "sum by (name, expected_response) (rate(k6_http_reqs_total{endpoint!=\"\"}[$__rate_interval]))",
+          "legendFormat": "{{name}} expected={{expected_response}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "reqps" } },
+      "options": {
+        "legend": { "displayMode": "table", "placement": "bottom" },
+        "tooltip": { "mode": "multi" }
+      }
+    },
+    {
+      "id": 10,
+      "title": "Latency Component Breakdown (avg ms)",
+      "type": "timeseries",
+      "gridPos": { "x": 12, "y": 32, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "expr": "avg by (name) (k6_http_req_waiting_avg{endpoint!=\"\",expected_response=\"true\"}) * 1000",
+          "legendFormat": "waiting {{name}}",
+          "refId": "A"
+        },
+        {
+          "expr": "avg by (name) (k6_http_req_tls_handshaking_avg{endpoint!=\"\",expected_response=\"true\"}) * 1000",
+          "legendFormat": "tls {{name}}",
+          "refId": "B"
+        },
+        {
+          "expr": "avg by (name) (k6_http_req_sending_avg{endpoint!=\"\",expected_response=\"true\"}) * 1000",
+          "legendFormat": "sending {{name}}",
+          "refId": "C"
+        },
+        {
+          "expr": "avg by (name) (k6_http_req_receiving_avg{endpoint!=\"\",expected_response=\"true\"}) * 1000",
+          "legendFormat": "receiving {{name}}",
+          "refId": "D"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "ms" } },
+      "options": {
+        "legend": { "displayMode": "table", "placement": "bottom" },
+        "tooltip": { "mode": "multi" }
+      }
+    }
+  ]
+}

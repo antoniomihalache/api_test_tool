@@ -1,0 +1,20 @@
+{
+  "name": "api-test-tool-platform",
+  "private": true,
+  "version": "1.0.0",
+  "workspaces": [
+    "backend",
+    "frontend"
+  ],
+  "scripts": {
+    "bootstrap": "bash ./scripts/dev-bootstrap.sh",
+    "dev": "docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build",
+    "up": "docker compose up -d --build",
+    "down": "docker compose down",
+    "logs": "docker compose logs -f",
+    "build": "npm --workspace backend run build && npm --workspace frontend run build",
+    "seed": "npm --workspace backend run seed",
+    "perf": "npm --workspace backend run perf",
+    "test": "npm --workspace backend run test"
+  }
+}

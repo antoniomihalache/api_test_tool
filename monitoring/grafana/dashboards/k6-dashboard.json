@@ -1,0 +1,167 @@
+{
+  "uid": "k6-perf-platform",
+  "title": "k6 Performance Platform",
+  "tags": ["k6", "performance"],
+  "timezone": "browser",
+  "schemaVersion": 38,
+  "version": 1,
+  "refresh": "5s",
+  "time": { "from": "now-30m", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "title": "HTTP Request Rate (RPS)",
+      "type": "stat",
+      "gridPos": { "x": 0, "y": 0, "w": 6, "h": 4 },
+      "targets": [
+        {
+          "expr": "rate(k6_http_reqs_total[1m])",
+          "legendFormat": "RPS",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "reduceOptions": { "calcs": ["lastNotNull"] }
+      }
+    },
+    {
+      "id": 2,
+      "title": "HTTP Error Rate",
+      "type": "stat",
+      "gridPos": { "x": 6, "y": 0, "w": 6, "h": 4 },
+      "targets": [
+        {
+          "expr": "rate(k6_http_req_failed_total[1m])",
+          "legendFormat": "Error Rate",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "colorMode": "background",
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "thresholds": {
+          "steps": [
+            { "color": "green", "value": null },
+            { "color": "yellow", "value": 0.01 },
+            { "color": "red", "value": 0.05 }
+          ]
+        }
+      }
+    },
+    {
+      "id": 3,
+      "title": "Active VUs",
+      "type": "stat",
+      "gridPos": { "x": 12, "y": 0, "w": 6, "h": 4 },
+      "targets": [
+        {
+          "expr": "k6_vus",
+          "legendFormat": "VUs",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "colorMode": "background",
+        "reduceOptions": { "calcs": ["lastNotNull"] }
+      }
+    },
+    {
+      "id": 4,
+      "title": "p95 Latency",
+      "type": "stat",
+      "gridPos": { "x": 18, "y": 0, "w": 6, "h": 4 },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, rate(k6_http_req_duration_bucket[1m]))",
+          "legendFormat": "p95",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "thresholds": {
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 300 },
+              { "color": "red", "value": 500 }
+            ]
+          }
+        }
+      },
+      "options": {
+        "colorMode": "background",
+        "reduceOptions": { "calcs": ["lastNotNull"] }
+      }
+    },
+    {
+      "id": 5,
+      "title": "HTTP Request Duration Percentiles",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 4, "w": 24, "h": 8 },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, rate(k6_http_req_duration_bucket[30s]))",
+          "legendFormat": "p50",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.90, rate(k6_http_req_duration_bucket[30s]))",
+          "legendFormat": "p90",
+          "refId": "B"
+        },
+        {
+          "expr": "histogram_quantile(0.95, rate(k6_http_req_duration_bucket[30s]))",
+          "legendFormat": "p95",
+          "refId": "C"
+        },
+        {
+          "expr": "histogram_quantile(0.99, rate(k6_http_req_duration_bucket[30s]))",
+          "legendFormat": "p99",
+          "refId": "D"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "ms", "custom": { "lineWidth": 2 } },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "p95" }, "properties": [{ "id": "color", "value": { "fixedColor": "orange", "mode": "fixed" } }] },
+          { "matcher": { "id": "byName", "options": "p99" }, "properties": [{ "id": "color", "value": { "fixedColor": "red", "mode": "fixed" } }] }
+        ]
+      }
+    },
+    {
+      "id": 6,
+      "title": "Request Rate Over Time",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 12, "w": 12, "h": 7 },
+      "targets": [
+        {
+          "expr": "rate(k6_http_reqs_total[30s])",
+          "legendFormat": "Requests/s",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "reqps" } }
+    },
+    {
+      "id": 7,
+      "title": "Virtual Users Over Time",
+      "type": "timeseries",
+      "gridPos": { "x": 12, "y": 12, "w": 12, "h": 7 },
+      "targets": [
+        {
+          "expr": "k6_vus",
+          "legendFormat": "Active VUs",
+          "refId": "A"
+        },
+        {
+          "expr": "k6_vus_max",
+          "legendFormat": "Max VUs",
+          "refId": "B"
+        }
+      ]
+    }
+  ]
+}

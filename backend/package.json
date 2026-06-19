@@ -1,0 +1,37 @@
+{
+  "name": "perf-platform-backend",
+  "version": "1.0.0",
+  "description": "API Performance Testing Platform - Backend",
+  "main": "src/index.js",
+  "type": "module",
+  "scripts": {
+    "dev": "node --watch src/index.js",
+    "start": "node src/index.js",
+    "seed": "node scripts/seed.js",
+    "seed:user": "node scripts/seed-user-only.js",
+    "perf": "node scripts/perf-check.js",
+    "lint": "eslint src --ext .js",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "cors": "^2.8.5",
+    "dockerode": "^4.0.2",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "express-rate-limit": "^7.3.1",
+    "express-validator": "^7.1.0",
+    "helmet": "^7.1.0",
+    "js-yaml": "^4.1.0",
+    "jsonwebtoken": "^9.0.2",
+    "mongoose": "^8.4.0",
+    "morgan": "^1.10.0",
+    "prom-client": "^15.1.2",
+    "uuid": "^10.0.0",
+    "ws": "^8.17.1",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "eslint": "^8.55.0"
+  }
+}

@@ -1,0 +1,101 @@
+services:
+  # ── Frontend ─────────────────────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+    environment:
+      - VITE_API_URL=http://localhost:4000
+    networks:
+      - perf-net
+
+  # ── Backend ──────────────────────────────────────────────────
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "4000:4000"
+    depends_on:
+      mongo:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      - MONGODB_URI=mongodb://mongo:27017/perf_platform
+      - K6_SCRIPTS_PATH=/tmp/k6-scripts
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - k6-scripts:/tmp/k6-scripts
+      - reports:/app/reports
+    networks:
+      - perf-net
+    restart: unless-stopped
+
+  # ── MongoDB ──────────────────────────────────────────────────
+  mongo:
+    image: mongo:7
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - perf-net
+    restart: unless-stopped
+
+  # ── Prometheus ───────────────────────────────────────────────
+  prometheus:
+    image: prom/prometheus:v2.51.0
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.enable-remote-write-receiver'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+    networks:
+      - perf-net
+    restart: unless-stopped
+
+  # ── Grafana ──────────────────────────────────────────────────
+  grafana:
+    image: grafana/grafana:10.4.0
+    ports:
+      - "3001:3000"
+    depends_on:
+      - prometheus
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_SERVER_ROOT_URL=http://localhost:3001
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    networks:
+      - perf-net
+    restart: unless-stopped
+
+volumes:
+  mongo-data:
+  prometheus-data:
+  grafana-data:
+  k6-scripts:
+  reports:
+
+networks:
+  perf-net:
+    driver: bridge
