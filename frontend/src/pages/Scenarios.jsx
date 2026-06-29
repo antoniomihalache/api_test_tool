@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { scenariosApi } from '../api/scenarios.js';
 import { servicesApi } from '../api/services.js';
 import { executionsApi } from '../api/executions.js';
+import { authApi } from '../api/auth.js';
 
 const METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'];
 const SCENARIO_TYPES = ['smoke', 'load', 'stress', 'spike', 'soak', 'custom'];
@@ -16,6 +17,7 @@ function emptyScenario() {
   return {
     name: '', description: '', type: 'load', serviceId: '', environment: 'dev',
     vus: 10, duration: '5m', requests: [emptyRequest()], thresholds: [], stages: [],
+    authConfigId: '',
   };
 }
 
@@ -141,6 +143,20 @@ function ScenarioModal({ scenario, services, onClose, onSaved }) {
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [authConfigs, setAuthConfigs] = useState([]);
+
+  useEffect(() => {
+    loadAuthConfigs();
+  }, []);
+
+  const loadAuthConfigs = async () => {
+    try {
+      const res = await authApi.list();
+      setAuthConfigs(res.data.data || []);
+    } catch (err) {
+      console.error('Failed to load auth configs:', err);
+    }
+  };
 
   const set = (key, val) => setForm(f => ({ ...f, [key]: val }));
 
@@ -159,6 +175,7 @@ function ScenarioModal({ scenario, services, onClose, onSaved }) {
     try {
       const payload = {
         ...form,
+        authConfigId: form.authConfigId || undefined,
         vus: Number(form.vus),
         requests: form.requests.map(r => ({
           ...r,
@@ -212,6 +229,15 @@ function ScenarioModal({ scenario, services, onClose, onSaved }) {
               <select value={form.environment} onChange={e => set('environment', e.target.value)}
                 className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-blue-500">
                 {availableEnvs.map(e => <option key={e}>{e}</option>)}
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">Auth Config (Optional)</label>
+              <select value={form.authConfigId || ''} onChange={e => set('authConfigId', e.target.value)}
+                className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-blue-500">
+                <option value="">No Auth</option>
+                {authConfigs.map(cfg => <option key={cfg.id} value={cfg.id}>{cfg.name}</option>)}
               </select>
             </div>
 

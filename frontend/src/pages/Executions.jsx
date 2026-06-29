@@ -6,6 +6,7 @@ const statusColors = {
   pending:   'bg-yellow-500/10 text-yellow-400 border-yellow-500/20',
   running:   'bg-blue-500/10 text-blue-400 border-blue-500/20',
   completed: 'bg-green-500/10 text-green-400 border-green-500/20',
+  completed_with_warnings: 'bg-amber-500/10 text-amber-300 border-amber-500/20',
   failed:    'bg-red-500/10 text-red-400 border-red-500/20',
   cancelled: 'bg-slate-500/10 text-slate-400 border-slate-500/20',
 };
@@ -14,6 +15,7 @@ const statusDot = {
   pending:   '🟡',
   running:   '🔵',
   completed: '🟢',
+  completed_with_warnings: '🟠',
   failed:    '🔴',
   cancelled: '⚫',
 };
@@ -77,15 +79,20 @@ export function Executions() {
       ) : (
         <div className="space-y-2">
           {executions.map(exec => (
+            (() => {
+              const uiStatus = exec.status === 'completed' && exec.thresholdBreached
+                ? 'completed_with_warnings'
+                : exec.status;
+              return (
             <Link key={exec.id} to={`/executions/${exec.id}`}
               className="block bg-slate-800 border border-slate-700 rounded-xl p-4 hover:border-slate-600 transition-colors">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
-                  <span>{statusDot[exec.status] || '⚫'}</span>
+                  <span>{statusDot[uiStatus] || '⚫'}</span>
                   <div>
                     <div className="flex items-center gap-2">
-                      <span className={`text-xs border px-2 py-0.5 rounded ${statusColors[exec.status] || statusColors.cancelled}`}>
-                        {exec.status}
+                      <span className={`text-xs border px-2 py-0.5 rounded ${statusColors[uiStatus] || statusColors.cancelled}`}>
+                        {uiStatus}
                       </span>
                       <span className="text-xs text-slate-500 font-mono">{exec._id || exec.id}</span>
                     </div>
@@ -108,6 +115,8 @@ export function Executions() {
                 )}
               </div>
             </Link>
+              );
+            })()
           ))}
         </div>
       )}

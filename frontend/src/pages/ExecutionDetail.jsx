@@ -6,6 +6,7 @@ const statusColors = {
   pending:   'text-yellow-400',
   running:   'text-blue-400',
   completed: 'text-green-400',
+  completed_with_warnings: 'text-amber-300',
   failed:    'text-red-400',
   cancelled: 'text-slate-400',
 };
@@ -49,6 +50,9 @@ export function ExecutionDetail() {
   if (!execution) return <div className="p-6 text-red-400">Execution not found</div>;
 
   const isActive = ['pending', 'running'].includes(execution.status);
+  const uiStatus = execution.status === 'completed' && execution.thresholdBreached
+    ? 'completed_with_warnings'
+    : execution.status;
 
   return (
     <div className="p-6 space-y-6">
@@ -61,10 +65,15 @@ export function ExecutionDetail() {
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
           <h1 className="text-2xl font-bold text-slate-100">Execution Detail</h1>
-          <span className={`text-sm font-semibold ${statusColors[execution.status]}`}>
+          <span className={`text-sm font-semibold ${statusColors[uiStatus]}`}>
             {isActive && <span className="inline-block w-2 h-2 rounded-full bg-blue-400 mr-2 animate-pulse" />}
-            {execution.status}
+            {uiStatus}
           </span>
+          {execution.thresholdBreached && (
+            <span className="text-xs font-semibold text-amber-300 bg-amber-500/10 border border-amber-500/30 px-2 py-1 rounded">
+              Threshold breached
+            </span>
+          )}
         </div>
         {isActive && (
           <button onClick={async () => { await executionsApi.cancel(id); load(); }}
@@ -76,7 +85,8 @@ export function ExecutionDetail() {
 
       {/* Metrics */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <MetricBox label="Status" value={execution.status} />
+        <MetricBox label="Status" value={uiStatus} />
+        <MetricBox label="Threshold" value={execution.thresholdBreached ? 'breached' : 'ok'} />
         <MetricBox label="VUs" value={execution.vus} />
         <MetricBox label="p95 Latency" value={execution.p95Latency?.toFixed(1)} unit="ms" />
         <MetricBox label="p99 Latency" value={execution.p99Latency?.toFixed(1)} unit="ms" />

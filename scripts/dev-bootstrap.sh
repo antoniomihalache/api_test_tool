@@ -279,7 +279,7 @@ info "Installing backend dependencies..."
 info "Installing frontend dependencies..."
 (cd "$ROOT_DIR/frontend" && npm install)
 
-info "Seeding database with default user only..."
+info "Ensuring default user exists (preserving existing services/scenarios)..."
 (cd "$ROOT_DIR/backend" && MONGODB_URI="$EFFECTIVE_MONGO_URI" npm run seed:user)
 
 info "Starting backend and frontend in dev mode..."
@@ -294,6 +294,8 @@ echo "Grafana:    http://localhost:3001 (admin/admin)"
 echo "Prometheus: http://localhost:9090"
 echo ""
 echo "Default login: admin@perf-platform.local / Admin1234!"
+echo "Data persistence: bootstrap preserves existing data by default."
+echo "To reset app data intentionally, run: (cd backend && RESET_APP_DATA=1 npm run seed:user)"
 echo ""
 echo "Logs:"
 echo "  Backend  -> $RUNTIME_DIR/backend.log"

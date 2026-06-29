@@ -2,6 +2,7 @@ import { ExecutionModel, ReportModel } from '../executions/executions.model.js';
 import { ScenarioModel } from '../scenarios/scenarios.model.js';
 import { ServiceModel } from '../services/services.model.js';
 import { AuthConfigModel } from '../auth/auth.model.js';
+import { tryResolveXc1TokenFallback } from '../auth/xc1-auth-fallback.service.js';
 import { K6Generator } from '../../generator/k6-generator.js';
 import { DockerRunner } from '../../runner/docker-runner.js';
 import { KubernetesRunner } from '../../runner/k8s-runner.js';
@@ -26,6 +27,22 @@ export class LaunchService {
     let authConfig = null;
     if (scenario.authConfigId) {
       authConfig = await AuthConfigModel.findById(scenario.authConfigId).lean();
+
+      // XC1 fallback: when direct grant is blocked, obtain token via browser/PKCE flow
+      // (same strategy as xc1-ffdc-parser) and inject it as static token for this run.
+      if (authConfig && !authConfig.staticToken) {
+        try {
+          const fallbackToken = await tryResolveXc1TokenFallback({
+            baseUrl: envEntry.baseUrl,
+            authConfig,
+          });
+          if (fallbackToken) {
+            authConfig = { ...authConfig, staticToken: fallbackToken };
+          }
+        } catch (err) {
+          console.error('[launch] XC1 auth fallback error:', err.message);
+        }
+      }
     }
 
     // 3. Generate k6 script
@@ -99,20 +116,23 @@ export class LaunchService {
       const logOutput = logs.join('');
       if (flushTimer) { clearTimeout(flushTimer); }
       const succeeded = result.exitCode === 0;
+      const thresholdBreached = /thresholds on metrics/i.test(logOutput);
+      const finalStatus = (succeeded || thresholdBreached) ? 'completed' : 'failed';
 
       // Parse basic metrics from k6 stdout
       const metrics = this._parseK6Output(logOutput);
 
       await ExecutionModel.findByIdAndUpdate(executionId, {
-        status: succeeded ? 'completed' : 'failed',
+        status: finalStatus,
         endTime: new Date(),
         logOutput,
         runnerId: result.containerId,
+        thresholdBreached,
         ...metrics,
       });
 
-      // Save report if succeeded
-      if (succeeded) {
+      // Save report if run completed (including threshold breach warnings)
+      if (finalStatus === 'completed') {
         const execution = await ExecutionModel.findById(executionId).lean();
         await ReportModel.create({
           executionId,
@@ -143,12 +163,19 @@ export class LaunchService {
       if (status === 'completed') {
         const logs = await runner.getLogs(jobName);
         const metrics = this._parseK6Output(logs);
-        await ExecutionModel.findByIdAndUpdate(executionId, { status: 'completed', endTime: new Date(), logOutput: logs, ...metrics });
+        const thresholdBreached = /thresholds on metrics/i.test(logs);
+        await ExecutionModel.findByIdAndUpdate(executionId, { status: 'completed', thresholdBreached, endTime: new Date(), logOutput: logs, ...metrics });
         return;
       }
       if (status === 'failed') {
         const logs = await runner.getLogs(jobName);
-        await ExecutionModel.findByIdAndUpdate(executionId, { status: 'failed', endTime: new Date(), logOutput: logs });
+        const thresholdBreached = /thresholds on metrics/i.test(logs);
+        await ExecutionModel.findByIdAndUpdate(executionId, {
+          status: thresholdBreached ? 'completed' : 'failed',
+          thresholdBreached,
+          endTime: new Date(),
+          logOutput: logs,
+        });
         return;
       }
     }

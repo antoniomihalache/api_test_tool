@@ -25,6 +25,7 @@ const ExecutionSchema = new mongoose.Schema({
   vus: Number,
   iterationCount: Number,
   failureRate: Number,
+  thresholdBreached: { type: Boolean, default: false },
   p95Latency: Number,
   p99Latency: Number,
   avgLatency: Number,

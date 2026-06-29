@@ -2,6 +2,7 @@ import { Router } from 'express';
 import {
   listExecutions,
   getExecution,
+  getExecutionScript,
   launchExecution,
   updateExecutionMetrics,
   cancelExecution,
@@ -19,6 +20,7 @@ router.use(authMiddleware);
 // Executions
 router.get('/', listExecutions);
 router.get('/:id', getExecution);
+router.get('/:id/script', getExecutionScript);
 router.post('/launch', launchExecution);
 router.patch('/:id/metrics', updateExecutionMetrics);
 router.patch('/:id/cancel', cancelExecution);

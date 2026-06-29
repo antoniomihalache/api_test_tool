@@ -38,6 +38,15 @@ export async function createExecution(req, res, next) {
   }
 }
 
+export async function getExecutionScript(req, res, next) {
+  try {
+    const data = await executionsSvc.getById(req.params.id);
+    res.type('text/plain').send(data.k6Script || '// script not available');
+  } catch (err) {
+    next(err);
+  }
+}
+
 export async function launchExecution(req, res, next) {
   try {
     const { scenarioId } = req.body;

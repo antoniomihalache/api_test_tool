@@ -24,13 +24,18 @@ const AuthConfigSchema = new mongoose.Schema({
   loginEndpoint: String,
   loginHeaders: { type: Map, of: String },
   loginBody: mongoose.Schema.Types.Mixed,
-  tokenExtractPath: String,
-  tokenHeaderName: String,
+  tokenExtractPath: { type: String, default: 'access_token' },
+  tokenHeaderName: { type: String, default: 'Authorization' },
   refreshEndpoint: String,
-  refreshTokenPath: String,
+  refreshTokenPath: { type: String, default: 'refresh_token' },
   staticToken: String,
   username: String,
   password: String,
+  loginBodyEncoding: { type: String, enum: ['json', 'form'], default: 'json' },
+  otpMode: { type: String, enum: ['none', 'code', 'secret'], default: 'none' },
+  otpRequired: { type: Boolean, default: false },
+  otpFieldName: { type: String, default: 'totp' },
+  otpSecret: String,
 }, { timestamps: true });
 
 export const UserModel = mongoose.model('User', UserSchema);
