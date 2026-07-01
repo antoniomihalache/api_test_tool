@@ -6,7 +6,7 @@ export class K6Generator {
 
   generateFromScenario(scenario, ctx) {
     const options = this.buildOptions(scenario.type, scenario.vus, scenario.duration, scenario.stages, scenario.thresholds);
-    const auth = this.buildAuthBlock(ctx.authConfig);
+    const auth = this.buildAuthBlock(ctx.authConfig, ctx.backendApiUrl);
     const requests = scenario.requests.map((req) => this.buildRequest(req, ctx.baseUrl)).join('\n\n');
 
     return this.wrap({ options, auth, body: requests, prometheusRwUrl: ctx.prometheusRwUrl });
@@ -14,7 +14,7 @@ export class K6Generator {
 
   generateFromFlow(flow, ctx) {
     const options = this.buildOptions('load', flow.vus, flow.duration, undefined, []);
-    const auth = this.buildAuthBlock(ctx.authConfig);
+    const auth = this.buildAuthBlock(ctx.authConfig, ctx.backendApiUrl);
     const steps = flow.steps.map((step, i) => this.buildFlowStep(step, ctx.baseUrl, i)).join('\n\n');
 
     return this.wrap({ options, auth, body: steps, prometheusRwUrl: ctx.prometheusRwUrl });
@@ -117,22 +117,188 @@ export class K6Generator {
 
   // ── Auth ────────────────────────────────────────────────────
 
-  buildAuthBlock(authConfig) {
+  buildAuthBlock(authConfig, backendApiUrl) {
     if (!authConfig || authConfig.type === 'none') return '';
 
     switch (authConfig.type) {
       case 'bearer':
       case 'jwt': {
-        if (authConfig.staticToken) {
+        // Use session-based auth with refresh capability if:
+        // 1. We have a static token (from initial successful auth), OR
+        // 2. We have credentials (env vars) and a backend to call (for public clients that can't do direct password grant)
+        const hasStaticToken = !!authConfig.staticToken;
+        const hasCredentials = !!(process.env.FALLBACK_USERNAME || process.env.FALLBACK_PASSWORD);
+        const canUseBackendRefresh = !!backendApiUrl;
+        
+        if (hasStaticToken || (hasCredentials && canUseBackendRefresh)) {
+          // Session-based auth with backend refresh (for public clients)
+          const loginEndpoint = authConfig.loginEndpoint ?? '/auth/login';
+          const tokenPath = authConfig.tokenExtractPath ?? 'access_token';
+          const isForm = (authConfig.loginBodyEncoding ?? 'json') === 'form';
           const headerName = authConfig.tokenHeaderName ?? 'Authorization';
+          const loginBody = authConfig.loginBody || {};
+          const backendUrl = backendApiUrl || __ENV.BACKEND_API_URL || 'http://localhost:4000';
+
           return `
-const TOKEN = ${JSON.stringify(authConfig.staticToken)};
-function authHeaders() {
-  return { ${JSON.stringify(headerName)}: \`Bearer \${TOKEN}\` };
+const TOKEN = ${JSON.stringify(authConfig.staticToken || '')};
+const HAS_CREDENTIALS = __ENV.FALLBACK_USERNAME && __ENV.FALLBACK_PASSWORD;
+const TOKEN_PATH = ${JSON.stringify(tokenPath)};
+const HEADER_NAME = ${JSON.stringify(headerName)};
+const REALM = __ENV.FALLBACK_REALM || ${JSON.stringify(loginEndpoint.match(/\/realms\/([^/]+)\//) ? loginEndpoint.match(/\/realms\/([^/]+)\//)[1] : 'Atlas')};
+const CLIENT_ID = __ENV.FALLBACK_CLIENT_ID || ${JSON.stringify(loginBody.client_id || 'frontend')};
+const BACKEND_API_URL = __ENV.BACKEND_API_URL || ${JSON.stringify(backendUrl)};
+
+// Helper: extract value from nested JSON object using dot notation
+function getJsonPath(obj, path) {
+  const parts = path.split('.');
+  let current = obj;
+  for (const part of parts) {
+    if (current == null) return undefined;
+    current = current[part];
+  }
+  return current;
 }
-function forceRefresh() {
-  return { token: TOKEN, refreshToken: null, issuedAt: Date.now() };
+
+// Session storage (one token per VU) with refresh capability
+const sessions = new Map();
+
+function authenticate(baseUrl) {
+  // When token expires in k6, call the backend's refresh endpoint
+  // to obtain a fresh token via browser/PKCE flow (for public clients).
+  // This is the same flow that was used to obtain the initial token.
+  
+  if (!__ENV.FALLBACK_USERNAME || !__ENV.FALLBACK_PASSWORD) {
+    console.error('[auth-refresh] Missing credentials: FALLBACK_USERNAME or FALLBACK_PASSWORD not set');
+    throw new Error('Token refresh failed: credentials not available');
+  }
+  
+  const refreshUrl = BACKEND_API_URL + '/api/v1/auth/refresh-token-via-browser';
+  const refreshBody = {
+    baseUrl: baseUrl,
+    realm: REALM,
+    clientId: CLIENT_ID,
+    username: __ENV.FALLBACK_USERNAME,
+    password: __ENV.FALLBACK_PASSWORD,
+  };
+  // Pass the raw TOTP secret (not a code) so the backend can generate a fresh
+  // time-based code at the moment of the refresh request. This avoids the
+  // "stale OTP code" lockout problem while still handling accounts with TOTP enabled.
+  if (__ENV.FALLBACK_OTP_SECRET) {
+    refreshBody.otpSecret = __ENV.FALLBACK_OTP_SECRET;
+  }
+  
+  console.log('[auth-refresh] Calling backend refresh endpoint');
+  console.log('[auth-refresh] URL=' + refreshUrl);
+  console.log('[auth-refresh] User=' + refreshBody.username);
+  
+  // Retry with exponential backoff on 429 (rate limit) errors
+  let lastError = null;
+  let retryCount = 0;
+  const maxRetries = 3;
+  
+  while (retryCount <= maxRetries) {
+    const refreshRes = http.post(refreshUrl, JSON.stringify(refreshBody), {
+      headers: { 'Content-Type': 'application/json' },
+    });
+    
+    // Success case
+    if (refreshRes.status >= 200 && refreshRes.status < 300) {
+      const data = refreshRes.json();
+      if (!data || !data.data) {
+        console.error('[auth-refresh] Invalid response: ' + refreshRes.body.substring(0, 200));
+        throw new Error('Token refresh failed: invalid response');
+      }
+      
+      const accessToken = data.data.accessToken;
+      if (!accessToken) {
+        console.error('[auth-refresh] No token in response: ' + JSON.stringify(data).substring(0, 300));
+        throw new Error('Token refresh failed: no token in response');
+      }
+      
+      console.log('[auth-refresh] Successfully obtained new token from backend');
+      const expiresIn = (data.data.expiresIn || 3600) * 1000; // convert to ms
+      return { token: accessToken, issuedAt: Date.now(), expiresIn: expiresIn };
+    }
+    
+    // Rate limit error: retry with backoff
+    if (refreshRes.status === 429) {
+      lastError = refreshRes;
+      retryCount++;
+      if (retryCount <= maxRetries) {
+        const delayMs = Math.pow(2, retryCount) * 500 + Math.random() * 500; // 1-1.5s, 2-2.5s, 4-4.5s
+        console.log('[auth-refresh] Got 429 (rate limited), retrying in ' + delayMs.toFixed(0) + 'ms (attempt ' + retryCount + '/' + maxRetries + ')');
+        sleep(delayMs / 1000);
+        continue;
+      }
+    }
+    
+    // Other errors: fail immediately
+    console.error('[auth-refresh] Backend refresh failed HTTP ' + refreshRes.status + ': ' + refreshRes.body.substring(0, 300));
+    throw new Error('Token refresh failed: backend returned HTTP ' + refreshRes.status);
+  }
+  
+  // Exhausted retries
+  console.error('[auth-refresh] Exhausted ' + maxRetries + ' retries on 429 errors');
+  throw new Error('Token refresh failed: rate limited (429) after ' + maxRetries + ' retries');
 }
+
+function authHeaders(baseUrl) {
+  if (!HAS_CREDENTIALS) {
+    // No credentials to refresh with; use static token
+    return { [HEADER_NAME]: \`Bearer \${TOKEN}\` };
+  }
+  
+  // Session-based: get or create session with proactive refresh.
+  // Use the real expiresIn from the initial token (passed via env var) so
+  // proactive refresh triggers before the very first expiry, not just subsequent ones.
+  const vuId = __VU;
+  let session = sessions.get(vuId);
+  if (!session) {
+    const initialExpiresIn = __ENV.FALLBACK_TOKEN_EXPIRES_IN ? parseInt(__ENV.FALLBACK_TOKEN_EXPIRES_IN, 10) * 1000 : 3600000;
+    session = { token: TOKEN, issuedAt: Date.now(), expiresIn: initialExpiresIn };
+    sessions.set(vuId, session);
+  }
+  
+  // Proactive refresh: if token expires within 60s, refresh now before making the request.
+  // This avoids getting a 401 mid-request and eliminates the retry round-trip.
+  const age = Date.now() - session.issuedAt;
+  const ttl = (session.expiresIn || 3600000) - age;
+  if (ttl < 60000) {
+    console.log('[auth-refresh] Token expiring soon (ttl=' + Math.round(ttl / 1000) + 's), proactive refresh (VU=' + __VU + ')');
+    session = forceRefresh(baseUrl);
+  }
+  
+  return { [HEADER_NAME]: \`Bearer \${session.token}\` };
+}
+
+function forceRefresh(baseUrl) {
+  if (!HAS_CREDENTIALS) {
+    // Cannot refresh static token without credentials
+    return { token: TOKEN, issuedAt: Date.now() };
+  }
+  
+  try {
+    // Add a small random delay to stagger refresh attempts across VUs.
+    // For shared service accounts, the backend implements token caching
+    // (10 second TTL) so concurrent refresh requests reuse the same token.
+    // This jitter just prevents immediate thundering herd on the initial wave.
+    const delayMs = Math.random() * 500; // 0-500ms random delay
+    if (delayMs > 100) {
+      console.log('[auth-refresh] Waiting ' + delayMs.toFixed(0) + 'ms before refresh (stagger VU=' + __VU + ')');
+      sleep(delayMs / 1000);
+    }
+    
+    const session = authenticate(baseUrl);
+    sessions.set(__VU, session);
+    return session;
+  } catch (err) {
+    console.error('[auth-refresh] ' + err.message);
+    // Return existing session token on refresh failure
+    const existing = sessions.get(__VU);
+    return existing || { token: TOKEN, issuedAt: Date.now() };
+  }
+}
+
 `;
         }
         return this.buildLoginAuth(authConfig);
@@ -333,9 +499,13 @@ function authHeaders(baseUrl) {
 
     const checks = this.buildChecks(req.assertions, req.name);
     const retry = hasAuth ? `
-    if (res.status === 401 && typeof forceRefresh === 'function') {
-      forceRefresh(BASE_URL);
-      res = http.${method}(${retryCallArgs});
+    if (res.status === 401) {
+      let retried = false;
+      if (!retried && typeof forceRefresh === 'function') {
+        retried = true;
+        forceRefresh(BASE_URL);
+        res = http.${method}(${retryCallArgs});
+      }
     }` : '';
 
     return `  // ${req.name}
@@ -379,9 +549,13 @@ ${checks}
       : '';
 
     const retry = hasAuth ? `
-    if (res.status === 401 && typeof forceRefresh === 'function') {
-      forceRefresh(BASE_URL);
-      res = http.${method}(${retryCallArgs});
+    if (res.status === 401) {
+      let retried = false;
+      if (!retried && typeof forceRefresh === 'function') {
+        retried = true;
+        forceRefresh(BASE_URL);
+        res = http.${method}(${retryCallArgs});
+      }
     }` : '';
 
     return `  // Step ${index + 1}: ${step.name}
@@ -502,7 +676,7 @@ ${params.body}
       scenario.stages,
       scenario.thresholds,
     );
-    const auth = this.buildAuthBlock(ctx.authConfig);
+    const auth = this.buildAuthBlock(ctx.authConfig, ctx.backendApiUrl);
     const hasAuth = !!auth && auth.length > 0;
     const needsCrypto = ctx.authConfig?.otpMode === 'secret';
     const trends = this.buildTrendDeclarations(scenario.requests);
@@ -515,7 +689,7 @@ ${params.body}
 
   generateFlowScript(flow, ctx) {
     const options = this.buildOptions('load', flow.vus, flow.duration, undefined, []);
-    const auth = this.buildAuthBlock(ctx.authConfig);
+    const auth = this.buildAuthBlock(ctx.authConfig, ctx.backendApiUrl);
     const hasAuth = !!auth && auth.length > 0;
     const needsCrypto = ctx.authConfig?.otpMode === 'secret';
     const trends = this.buildFlowTrends(flow.steps);

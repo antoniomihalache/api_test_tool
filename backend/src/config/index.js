@@ -17,6 +17,7 @@ const envSchema = z.object({
   KUBECONFIG: z.string().optional(),
   K8S_NAMESPACE: z.string().default('perf-tests'),
   PROMETHEUS_URL: z.string().default('http://prometheus:9090'),
+  BACKEND_API_URL: z.string().default('http://localhost:4000'),
   CORS_ORIGINS: z.string().default('http://localhost:3000,http://localhost:5173'),
   RATE_LIMIT_WINDOW_MS: z.coerce.number().default(60000),
   RATE_LIMIT_MAX: z.coerce.number().default(200),

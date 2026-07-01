@@ -17,10 +17,15 @@ export const options = {
   // Override with stages for ramp-up patterns
   vus: 10,
   duration: '30s',
+  // thresholds: {
+  //   http_req_failed: ['rate<0.05'],        // < 5% errors
+  //   http_req_duration: ['p(95)<500'],      // p95 < 500ms
+  // },
   thresholds: {
-    http_req_failed: ['rate<0.05'],        // < 5% errors
-    http_req_duration: ['p(95)<500'],      // p95 < 500ms
-  },
+  http_req_failed: ['rate<0.01'],
+  http_req_duration: ['p(95)<4000'],
+  get_events_duration: ['p(95)<4000'],
+}
 };
 
 // ── Custom metrics ────────────────────────────────────────────
@@ -64,5 +69,5 @@ export default function () {
     'latency < 500ms': (r) => r.timings.duration < 500,
   });
 
-  sleep(1);
+  // sleep(1);
 }

@@ -1,22 +1,9 @@
-import { createRequire } from 'node:module';
-import http from 'node:http';
-import https from 'node:https';
 import crypto from 'node:crypto';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const require = createRequire(import.meta.url);
+import { resolveKeycloakToken } from './keycloak-auth.service.js';
 
 function extractRealm(loginEndpoint = '') {
   const match = String(loginEndpoint).match(/\/realms\/([^/]+)\//);
   return match?.[1] || 'Atlas';
-}
-
-function parseVmIp(baseUrl) {
-  const parsed = new URL(baseUrl);
-  return parsed.hostname;
 }
 
 function safeString(value) {
@@ -58,37 +45,6 @@ function generateTotpFromSecret(secret) {
   return String(code).padStart(6, '0');
 }
 
-function postForm(url, data) {
-  return new Promise((resolve, reject) => {
-    const payload = new URLSearchParams(data).toString();
-    const parsed = new URL(url);
-    const transport = parsed.protocol === 'http:' ? http : https;
-    const req = transport.request(parsed, {
-      method: 'POST',
-      rejectUnauthorized: false,
-      headers: {
-        Accept: 'application/json, text/plain, */*',
-        'Content-Type': 'application/x-www-form-urlencoded',
-        'Content-Length': Buffer.byteLength(payload),
-        Origin: `${parsed.protocol}//${parsed.host}`,
-        Referer: `${parsed.protocol}//${parsed.host}/`,
-      },
-    }, (res) => {
-      const chunks = [];
-      res.on('data', (c) => chunks.push(c));
-      res.on('end', () => {
-        const raw = Buffer.concat(chunks).toString('utf8');
-        let json = null;
-        try { json = raw ? JSON.parse(raw) : null; } catch {}
-        resolve({ status: res.statusCode || 0, raw, json });
-      });
-    });
-    req.on('error', reject);
-    req.write(payload);
-    req.end();
-  });
-}
-
 export async function tryResolveXc1TokenFallback({ baseUrl, authConfig }) {
   if (!authConfig?.loginEndpoint || !String(authConfig.loginEndpoint).includes('/protocol/openid-connect/token')) {
     return null;
@@ -112,66 +68,20 @@ export async function tryResolveXc1TokenFallback({ baseUrl, authConfig }) {
   }
 
   const realm = extractRealm(authConfig.loginEndpoint);
-  const vmIp = parseVmIp(baseUrl);
-  const tokenUrl = `${String(baseUrl).replace(/\/$/, '')}${authConfig.loginEndpoint}`;
-
-  // First, try direct grant quickly. If it succeeds or fails for reasons other than
-  // unauthorized_client, keep k6 direct auth path unchanged.
-  const directData = {
-    grant_type: safeString(body.grant_type || 'password'),
-    client_id: clientId,
-    username,
-    password,
-  };
-  if (safeString(body.client_secret)) directData.client_secret = safeString(body.client_secret);
-  if (authCode) directData[otpFieldName] = authCode;
+  const baseUrlNormalized = String(baseUrl).replace(/\/$/, '');
 
   try {
-    const directRes = await postForm(tokenUrl, directData);
-    if (directRes.status >= 200 && directRes.status < 300 && directRes.json?.access_token) {
-      return null;
-    }
-    if (directRes.json?.error !== 'unauthorized_client') {
-      return null;
-    }
-  } catch {
-    return null;
-  }
-
-  const modulePath = path.resolve(__dirname, '../../../../../xc1-ffdc-parser/server/src/services/xc1Auth.js');
-  let xc1Auth;
-  try {
-    xc1Auth = require(modulePath);
-  } catch {
-    return null;
-  }
-
-  if (!xc1Auth?.loginAndResolveOrg) {
-    return null;
-  }
-
-  const previousEnv = {
-    REMOTE_FETCH_XC1_REALM: process.env.REMOTE_FETCH_XC1_REALM,
-    REMOTE_FETCH_XC1_CLIENT_ID: process.env.REMOTE_FETCH_XC1_CLIENT_ID,
-  };
-
-  process.env.REMOTE_FETCH_XC1_REALM = realm;
-  if (clientId) {
-    process.env.REMOTE_FETCH_XC1_CLIENT_ID = clientId;
-  }
-
-  try {
-    const resolved = await xc1Auth.loginAndResolveOrg({ vmIp, username, password, authCode });
-    const bearerToken = safeString(resolved?.bearerToken);
-    return bearerToken || null;
+    const tokenData = await resolveKeycloakToken({
+      baseUrl: baseUrlNormalized,
+      realm,
+      clientId: clientId || undefined,
+      username,
+      password,
+      authCode: authCode || undefined,
+    });
+    return tokenData;
   } catch (err) {
     const message = err?.message || String(err);
-    throw new Error(`XC1 fallback auth failed: ${message}`);
-  } finally {
-    if (previousEnv.REMOTE_FETCH_XC1_REALM === undefined) delete process.env.REMOTE_FETCH_XC1_REALM;
-    else process.env.REMOTE_FETCH_XC1_REALM = previousEnv.REMOTE_FETCH_XC1_REALM;
-
-    if (previousEnv.REMOTE_FETCH_XC1_CLIENT_ID === undefined) delete process.env.REMOTE_FETCH_XC1_CLIENT_ID;
-    else process.env.REMOTE_FETCH_XC1_CLIENT_ID = previousEnv.REMOTE_FETCH_XC1_CLIENT_ID;
+    throw new Error(`Keycloak fallback auth failed: ${message}`);
   }
 }

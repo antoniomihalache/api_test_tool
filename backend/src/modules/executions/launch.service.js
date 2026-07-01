@@ -32,12 +32,18 @@ export class LaunchService {
       // (same strategy as xc1-ffdc-parser) and inject it as static token for this run.
       if (authConfig && !authConfig.staticToken) {
         try {
-          const fallbackToken = await tryResolveXc1TokenFallback({
+          const fallbackTokenData = await tryResolveXc1TokenFallback({
             baseUrl: envEntry.baseUrl,
             authConfig,
           });
-          if (fallbackToken) {
-            authConfig = { ...authConfig, staticToken: fallbackToken };
+          if (fallbackTokenData?.accessToken) {
+            authConfig = { 
+              ...authConfig, 
+              staticToken: fallbackTokenData.accessToken,
+              refreshToken: fallbackTokenData.refreshToken,
+              tokenExpiresIn: fallbackTokenData.expiresIn || fallbackTokenData.expires_in || 300,
+            };
+            console.log('[launch] Obtained token via fallback, has_refresh=' + !!fallbackTokenData.refreshToken + ' expires_in=' + authConfig.tokenExpiresIn + 's');
           }
         } catch (err) {
           console.error('[launch] XC1 auth fallback error:', err.message);
@@ -49,6 +55,7 @@ export class LaunchService {
     const script = generator.generateScript(scenario, {
       baseUrl: envEntry.baseUrl,
       authConfig,
+      backendApiUrl: config.BACKEND_API_URL,
       prometheusRwUrl: config.K6_PROMETHEUS_RW_SERVER_URL,
     });
 
@@ -65,12 +72,12 @@ export class LaunchService {
     });
 
     // 5. Run asynchronously (don't block HTTP response)
-    this._runInBackground(execution._id.toString(), script, envEntry.baseUrl);
+    this._runInBackground(execution._id.toString(), script, envEntry.baseUrl, authConfig, config.BACKEND_API_URL);
 
     return execution.toObject();
   }
 
-  async _runInBackground(executionId, script, baseUrl) {
+  async _runInBackground(executionId, script, baseUrl, authConfig, backendApiUrl) {
     try {
       await ExecutionModel.findByIdAndUpdate(executionId, { status: 'running' });
 
@@ -110,7 +117,8 @@ export class LaunchService {
         return;
       } else {
         const runner = new DockerRunner();
-        result = await runner.run({ executionId, scriptContent: script, baseUrl }, onLog);
+        const env = this._buildEnvVars(authConfig, backendApiUrl);
+        result = await runner.run({ executionId, scriptContent: script, baseUrl, env }, onLog);
       }
 
       const logOutput = logs.join('');
@@ -180,6 +188,53 @@ export class LaunchService {
       }
     }
     await ExecutionModel.findByIdAndUpdate(executionId, { status: 'failed', endTime: new Date(), logOutput: 'Timed out waiting for k8s job' });
+  }
+
+  _buildEnvVars(authConfig, backendApiUrl) {
+    const env = {};
+    if (!authConfig || !authConfig.staticToken) {
+      return env;
+    }
+    // When using fallback token (staticToken), pass credentials so k6 can refresh if token expires
+    const body = authConfig.loginBody || {};
+    
+    if (body.username) {
+      env.FALLBACK_USERNAME = body.username;
+    }
+    if (body.password) {
+      env.FALLBACK_PASSWORD = body.password;
+    }
+    if (body.client_id) {
+      env.FALLBACK_CLIENT_ID = body.client_id;
+    } else {
+      env.FALLBACK_CLIENT_ID = 'frontend'; // Keycloak default
+    }
+    if (body.client_secret) {
+      env.FALLBACK_CLIENT_SECRET = body.client_secret;
+    }
+    if (authConfig.refreshToken) {
+      env.FALLBACK_REFRESH_TOKEN = authConfig.refreshToken;
+    }
+    if (authConfig.otpSecret) {
+      env.FALLBACK_OTP_SECRET = authConfig.otpSecret;
+    }
+    if (authConfig.realm) {
+      env.FALLBACK_REALM = authConfig.realm;
+    }
+    if (authConfig.tokenExpiresIn) {
+      env.FALLBACK_TOKEN_EXPIRES_IN = String(authConfig.tokenExpiresIn);
+    }
+    
+    // Pass the backend API URL for token refresh endpoint
+    if (backendApiUrl) {
+      env.BACKEND_API_URL = backendApiUrl;
+    }
+    
+    // Debug: log what credentials are available
+    if (env.FALLBACK_USERNAME) {
+      console.log('[launch] Passing credentials to k6: username=' + env.FALLBACK_USERNAME + ' client_id=' + env.FALLBACK_CLIENT_ID + ' has_refresh=' + !!env.FALLBACK_REFRESH_TOKEN);
+    }
+    return env;
   }
 
   _parseK6Output(output) {

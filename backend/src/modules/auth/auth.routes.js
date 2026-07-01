@@ -6,12 +6,14 @@ import {
   createAuthConfig,
   updateAuthConfig,
   deleteAuthConfig,
+  refreshTokenViaBrowser,
 } from './auth.controller.js';
 import { authMiddleware } from '../../middleware/auth.middleware.js';
 
 const router = Router();
 
 router.post('/login', login);
+router.post('/refresh-token-via-browser', refreshTokenViaBrowser);
 router.get('/configs', authMiddleware, listAuthConfigs);
 router.get('/configs/:id', authMiddleware, getAuthConfig);
 router.post('/configs', authMiddleware, createAuthConfig);
